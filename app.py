@@ -1,23 +1,45 @@
 import streamlit as st
-import gspread
+import sqlite3
 from datetime import datetime, timedelta
-from google.oauth2.service_account import Credentials
 import pandas as pd
 
-# --- Google Sheet 认证 ---
-SHEET_NAME = "Habits"
+# --- SQLite 数据库设置 ---
+DB_FILE = "habit_tracker.db"
 
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-CREDS_FILE = "credentials.json"
+def init_db():
+    """初始化数据库，创建表结构"""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS habits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            habit TEXT NOT NULL,
+            score INTEGER NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-@st.cache_resource
-def connect_sheet():
-    creds = Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
-    client = gspread.authorize(creds)
-    sheet = client.open(SHEET_NAME).sheet1  # 默认第一张表
-    return sheet
+def insert_record(date, habit, score):
+    """插入一条记录"""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO habits (date, habit, score) VALUES (?, ?, ?)", (date, habit, score))
+    conn.commit()
+    conn.close()
 
-sheet = connect_sheet()
+def fetch_records():
+    """获取所有记录"""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT date, habit, score FROM habits ORDER BY date DESC")
+    records = cursor.fetchall()
+    conn.close()
+    return records
+
+# 初始化数据库
+init_db()
 
 # --- Streamlit 页面设置 ---
 st.set_page_config(page_title="习惯评分记录器", layout="centered")
@@ -33,7 +55,7 @@ submit = st.button("提交评分")
 
 if submit:
     try:
-        sheet.append_row([yesterday, habit, score])
+        insert_record(yesterday, habit, score)
         st.success(f"✅ 已记录：{yesterday} - {habit} - {score}分")
     except Exception as e:
         st.error(f"⚠️ 提交失败：{e}")
@@ -43,10 +65,9 @@ st.divider()
 st.subheader("📊 评分历史")
 
 try:
-    data = sheet.get_all_records()
-    df = pd.DataFrame(data)
-    if not df.empty:
-        df = df.sort_values(by="date", ascending=False)
+    records = fetch_records()
+    if records:
+        df = pd.DataFrame(records, columns=["日期", "习惯", "评分"])
         st.dataframe(df, use_container_width=True)
     else:
         st.info("暂无评分记录")
